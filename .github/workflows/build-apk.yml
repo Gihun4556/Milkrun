@@ -4,16 +4,16 @@ on:
   push:
     branches: [main]
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+ 
       - name: Unpack Android project
         run: unzip -qo MilkRun-android-project.zip
-
+ 
       - name: Put the latest game into the app
         run: |
           if [ -f milkrun-game.zip ]; then
@@ -22,24 +22,60 @@ jobs:
           elif [ -f site/index.html ]; then
             cp site/index.html MilkRun/app/src/main/assets/www/index.html
           fi
-
+ 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
+ 
       - name: Accept Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-
+ 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-
-      - name: Build debug APK
+ 
+      - name: Prepare signing key (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/milkrun.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/milkrun.jks" >> "$GITHUB_ENV"
+          fi
+ 
+      - name: Build APK
         working-directory: MilkRun
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_PATH" ]; then
+            gradle :app:assembleRelease --no-daemon --stacktrace
+          else
+            gradle :app:assembleDebug --no-daemon --stacktrace
+          fi
+ 
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          APK=$(find MilkRun/app/build/outputs/apk -name '*.apk' | head -1)
+          echo "Found: $APK"
+          test -n "$APK"
+          cp "$APK" out/MilkRun.apk
+          ls -la out
+ 
       - uses: actions/upload-artifact@v4
         with:
           name: MilkRun-APK
-          path: MilkRun/app/build/outputs/apk/debug/*.apk
+          path: out/MilkRun.apk
+          if-no-files-found: error
+ 
+      - name: Publish release (direct download link)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest out/MilkRun.apk --target "${{ github.sha }}" --title "MilkRun build ${{ github.run_number }}" --notes "Свежая сборка игры" --latest
+ 
