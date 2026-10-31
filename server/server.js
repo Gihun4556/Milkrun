@@ -2,6 +2,7 @@
 const http = require('http'), crypto = require('crypto');
 const PORT = process.env.PORT || 8080;
 const rooms = new Map();
+const clients = new Set();
 let nextId = 1;
 
 function makeCode() {
@@ -11,14 +12,16 @@ function makeCode() {
 const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('milk run server ok'); });
 
 server.on('upgrade', (req, sock) => {
+  sock.setNoDelay(true);
   const key = req.headers['sec-websocket-key'];
   if (!key) { sock.destroy(); return; }
   const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
   const client = { sock, id: String(nextId++), room: null, buf: Buffer.alloc(0) };
+  clients.add(client);
   sock.on('data', d => { client.buf = Buffer.concat([client.buf, d]); parse(client); });
-  sock.on('close', () => leave(client));
-  sock.on('error', () => leave(client));
+  sock.on('close', () => { clients.delete(client); leave(client); });
+  sock.on('error', () => { clients.delete(client); leave(client); });
 });
 
 function parse(c) {
@@ -56,7 +59,6 @@ function broadcast(r, o, exceptId) { for (const p of r.players.values()) if (p.i
 function joinRoom(c, r, name, av) {
   c.room = r;
   r.players.set(c.id, { id: c.id, client: c, name: String(name || 'Игрок').slice(0, 12), av: (m_av(av)), alive: true, score: 0 });
-  broadcast(r, { t: 'players', host: r.host, list: roomList(r) });
 }
 function leave(c) {
   const r = c.room;
@@ -69,7 +71,7 @@ function leave(c) {
   checkEnd(r);
 }
 function checkEnd(r) {
-  if (!r.started || r.players.size < 2) return;
+  if (!r.started) return;
   const alive = [...r.players.values()].filter(p => p.alive);
   if (alive.length > 1) return;
   r.started = false;
@@ -87,6 +89,7 @@ function handle(c, text) {
     rooms.set(cd, r);
     joinRoom(c, r, m.name, m.av);
     send(c, { t: 'room', code: cd, you: c.id });
+    broadcast(r, { t: 'players', host: r.host, list: roomList(r) });
     return;
   }
   if (m.t === 'join') {
@@ -98,6 +101,7 @@ function handle(c, text) {
     if (c.room) leave(c);
     joinRoom(c, r, m.name, m.av);
     send(c, { t: 'room', code: cd, you: c.id });
+    broadcast(r, { t: 'players', host: r.host, list: roomList(r) });
     return;
   }
   if (m.t === 'leave') { leave(c); return; }
@@ -107,6 +111,7 @@ function handle(c, text) {
   if (!p) return;
   if (m.t === 'start') {
     if (r.host !== c.id || r.started) return;
+    if (r.players.size < 2) return send(c, { t: 'error', msg: 'need2' });
     r.started = true;
     for (const q of r.players.values()) { q.alive = true; q.score = 0; }
     broadcast(r, { t: 'start', seed: Math.floor(Math.random() * 1e9) }, null);
@@ -122,4 +127,7 @@ function handle(c, text) {
   }
 }
 
-server.listen(PORT, () => console.log('milk run server on ' + PORT));
+// keep connections alive behind proxies (they drop idle sockets after ~1 minute)
+setInterval(() => { for (const c of clients) { try { c.sock.write(frame('', 0x9)); } catch (e) {} } }, 25000);
+
+server.listen(PORT, '0.0.0.0', () => console.log('milk run server on ' + PORT));
