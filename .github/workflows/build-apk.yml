@@ -3,23 +3,42 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unpack project
-        run: unzip -q MilkRun-android-project.zip
+
+      - name: Unpack Android project
+        run: unzip -qo MilkRun-android-project.zip
+
+      - name: Put the latest game into the app
+        run: |
+          if [ -f milkrun-game.zip ]; then
+            unzip -qo milkrun-game.zip -d /tmp/game
+            cp /tmp/game/index.html MilkRun/app/src/main/assets/www/index.html
+          elif [ -f site/index.html ]; then
+            cp site/index.html MilkRun/app/src/main/assets/www/index.html
+          fi
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
       - name: Build debug APK
         working-directory: MilkRun
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
           name: MilkRun-APK
