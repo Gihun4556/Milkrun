@@ -18,9 +18,9 @@ jobs:
         run: |
           if [ -f milkrun-game.zip ]; then
             unzip -qo milkrun-game.zip -d /tmp/game
-            cp /tmp/game/index.html MilkRun/app/src/main/assets/www/index.html
-          elif [ -f site/index.html ]; then
-            cp site/index.html MilkRun/app/src/main/assets/www/index.html
+            cp -r /tmp/game/. MilkRun/app/src/main/assets/www/
+          elif [ -d site ]; then
+            cp -r site/. MilkRun/app/src/main/assets/www/
           fi
  
       - uses: actions/setup-java@v4
@@ -63,13 +63,13 @@ jobs:
           APK=$(find MilkRun/app/build/outputs/apk -name '*.apk' | head -1)
           echo "Found: $APK"
           test -n "$APK"
-          cp "$APK" out/MilkRun.apk
+          cp "$APK" out/Pobeg-iz-sela-Molochnogo.apk
           ls -la out
  
       - uses: actions/upload-artifact@v4
         with:
           name: MilkRun-APK
-          path: out/MilkRun.apk
+          path: out/Pobeg-iz-sela-Molochnogo.apk
           if-no-files-found: error
  
       - name: Publish release (direct download link)
@@ -77,5 +77,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest out/MilkRun.apk --target "${{ github.sha }}" --title "MilkRun build ${{ github.run_number }}" --notes "Свежая сборка игры" --latest
+          gh release create latest out/Pobeg-iz-sela-Molochnogo.apk --target "${{ github.sha }}" --title "Побег из села Молочного, сборка ${{ github.run_number }}" --notes "Свежая сборка игры" --latest
  
